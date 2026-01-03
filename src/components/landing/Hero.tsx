@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 export default function Hero() {
   return (
     <section className="relative overflow-hidden bg-linear-to-b from-indigo-50 via-slate-50 to-emerald-50 px-6 py-28">
-      {/* pastel blobs */}
       <div className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute -top-24 left-1/2 h-112 w-240 -translate-x-1/2 rounded-full bg-linear-to-r from-indigo-200/50 via-sky-200/40 to-transparent blur-3xl" />
         <div className="absolute bottom-0 right-0 h-72 w-72 rounded-full bg-linear-to-tr from-emerald-200/40 to-transparent blur-3xl" />

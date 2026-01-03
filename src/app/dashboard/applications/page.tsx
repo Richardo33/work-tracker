@@ -6,8 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import StatusBadge from "@/components/ui/Statusbadge";
-import { Search, Plus, ArrowUpDown } from "lucide-react";
 import ClientDateTime from "@/components/common/ClientDateTime";
+import { Search, Plus, ArrowUpDown } from "lucide-react";
 
 type Status =
   | "applied"
@@ -25,9 +25,9 @@ type Application = {
   location: string;
   workSetup: "Onsite" | "Hybrid" | "Remote";
   status: Status;
-  appliedAt: string; // ISO date string
-  lastUpdate: string; // ISO date string
-  nextEventAt?: string; // ISO date string (optional)
+  appliedAt: string; // YYYY-MM-DD or ISO
+  lastUpdate: string; // YYYY-MM-DD or ISO
+  nextEventAt?: string; // ISO (optional)
   nextEventTitle?: string;
 };
 
@@ -66,26 +66,6 @@ const data: Application[] = [
     appliedAt: "2025-12-10",
     lastUpdate: "2025-12-12",
   },
-  {
-    id: "a4",
-    company: "Fintech C",
-    role: "Junior Software Engineer",
-    location: "Jakarta",
-    workSetup: "Hybrid",
-    status: "ghosting",
-    appliedAt: "2025-11-20",
-    lastUpdate: "2025-11-25",
-  },
-  {
-    id: "a5",
-    company: "Agency D",
-    role: "React Developer",
-    location: "Tangerang",
-    workSetup: "Onsite",
-    status: "rejected",
-    appliedAt: "2025-12-01",
-    lastUpdate: "2025-12-05",
-  },
 ];
 
 const statusTabs: Array<{ key: "all" | Status; label: string }> = [
@@ -108,7 +88,35 @@ const sortOptions: Array<{ key: SortKey; label: string }> = [
   { key: "statusAsc", label: "Status" },
 ];
 
-export default function TrackerPage() {
+function countByStatus(rows: Application[]) {
+  const init: Record<Status, number> = {
+    applied: 0,
+    screening: 0,
+    interview: 0,
+    technical_test: 0,
+    offer: 0,
+    rejected: 0,
+    ghosting: 0,
+  };
+
+  for (const r of rows) init[r.status] += 1;
+  return init;
+}
+
+function getNextUpcoming(rows: Application[]) {
+  const upcoming = rows
+    .filter((r) => r.nextEventAt)
+    .map((r) => ({
+      ...r,
+      t: new Date(r.nextEventAt as string).getTime(),
+    }))
+    .filter((r) => !Number.isNaN(r.t))
+    .sort((a, b) => a.t - b.t);
+
+  return upcoming[0] ?? null;
+}
+
+export default function ApplicationsPage() {
   const [query, setQuery] = useState("");
   const [activeStatus, setActiveStatus] = useState<"all" | Status>("all");
   const [sortKey, setSortKey] = useState<SortKey>("lastUpdateDesc");
@@ -129,16 +137,10 @@ export default function TrackerPage() {
     });
 
     rows.sort((a, b) => {
-      if (sortKey === "companyAsc") {
-        return a.company.localeCompare(b.company);
-      }
-
-      if (sortKey === "statusAsc") {
-        return a.status.localeCompare(b.status);
-      }
+      if (sortKey === "companyAsc") return a.company.localeCompare(b.company);
+      if (sortKey === "statusAsc") return a.status.localeCompare(b.status);
 
       if (sortKey === "nextEventAsc") {
-        // Put items WITHOUT nextEvent at the bottom
         const aTime = a.nextEventAt
           ? new Date(a.nextEventAt).getTime()
           : Number.POSITIVE_INFINITY;
@@ -148,7 +150,6 @@ export default function TrackerPage() {
         return aTime - bTime;
       }
 
-      // lastUpdateDesc (default)
       const aTime = new Date(a.lastUpdate).getTime();
       const bTime = new Date(b.lastUpdate).getTime();
       return bTime - aTime;
@@ -157,12 +158,15 @@ export default function TrackerPage() {
     return rows;
   }, [query, activeStatus, sortKey]);
 
+  const stats = useMemo(() => countByStatus(filtered), [filtered]);
+  const nextUp = useMemo(() => getNextUpcoming(filtered), [filtered]);
+
   return (
     <div className="space-y-5">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold text-slate-900">Tracker</h1>
+          <h1 className="text-lg font-semibold text-slate-900">Applications</h1>
           <p className="text-sm text-slate-600">
             Filter, search, and sort your applications.
           </p>
@@ -262,6 +266,112 @@ export default function TrackerPage() {
         </p>
       </div>
 
+      {/* Mini Stats */}
+      <div className="grid gap-3 md:grid-cols-4">
+        <Card className="rounded-2xl border-slate-200/70 bg-white/70 shadow-sm backdrop-blur">
+          <CardContent className="p-4">
+            <p className="text-xs text-slate-500">Total</p>
+            <p className="mt-1 text-2xl font-semibold text-slate-900">
+              {filtered.length}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Apps in current filter
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border-slate-200/70 bg-white/70 shadow-sm backdrop-blur">
+          <CardContent className="p-4">
+            <p className="text-xs text-slate-500">Interview</p>
+            <p className="mt-1 text-2xl font-semibold text-slate-900">
+              {stats.interview}
+            </p>
+            <button
+              onClick={() => setActiveStatus("interview")}
+              className="mt-2 text-xs font-medium text-indigo-700 hover:underline"
+            >
+              Filter interview →
+            </button>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border-slate-200/70 bg-white/70 shadow-sm backdrop-blur">
+          <CardContent className="p-4">
+            <p className="text-xs text-slate-500">Technical Test</p>
+            <p className="mt-1 text-2xl font-semibold text-slate-900">
+              {stats.technical_test}
+            </p>
+            <button
+              onClick={() => setActiveStatus("technical_test")}
+              className="mt-2 text-xs font-medium text-indigo-700 hover:underline"
+            >
+              Filter test →
+            </button>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border-slate-200/70 bg-white/70 shadow-sm backdrop-blur">
+          <CardContent className="p-4">
+            <p className="text-xs text-slate-500">Next up</p>
+            {nextUp ? (
+              <>
+                <p className="mt-1 text-sm font-semibold text-slate-900 truncate">
+                  {nextUp.nextEventTitle ?? "Upcoming event"}
+                </p>
+                <p className="mt-1 text-xs text-slate-600">
+                  <span className="text-slate-500">{nextUp.company}</span> ·{" "}
+                  <span className="font-medium text-slate-800">
+                    <ClientDateTime value={nextUp.nextEventAt} />
+                  </span>
+                </p>
+                <Link
+                  href={`/dashboard/applications/${nextUp.id}`}
+                  className="mt-2 inline-block text-xs font-medium text-indigo-700 hover:underline"
+                >
+                  View details →
+                </Link>
+              </>
+            ) : (
+              <>
+                <p className="mt-1 text-sm font-semibold text-slate-900">-</p>
+                <p className="mt-1 text-xs text-slate-500">No upcoming event</p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Quick Actions */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs text-slate-500">Quick actions:</div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            className="rounded-xl bg-indigo-600 hover:bg-indigo-700"
+            asChild
+          >
+            <Link href="/dashboard/applications/new">
+              <span className="inline-flex items-center">
+                <Plus className="mr-2 h-4 w-4" />
+                Add application
+              </span>
+            </Link>
+          </Button>
+
+          <Button
+            variant="outline"
+            className="rounded-xl border-slate-200 bg-white/60"
+            onClick={() => {
+              setQuery("");
+              setActiveStatus("all");
+              setSortKey("lastUpdateDesc");
+            }}
+          >
+            Reset filters
+          </Button>
+        </div>
+      </div>
+
       {/* List */}
       <div className="space-y-3">
         {filtered.map((a) => (
@@ -290,12 +400,10 @@ export default function TrackerPage() {
                         Applied:{" "}
                         <ClientDateTime value={a.appliedAt} showTime={false} />
                       </span>
-
                       <span>
                         Last update:{" "}
                         <ClientDateTime value={a.lastUpdate} showTime={false} />
                       </span>
-
                       {a.nextEventAt ? (
                         <span className="text-slate-700">
                           Next:{" "}
