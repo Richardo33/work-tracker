@@ -9,14 +9,9 @@ import StatusBadge from "@/components/ui/Statusbadge";
 import ClientDateTime from "@/components/common/ClientDateTime";
 import { Search, Plus, ArrowUpDown } from "lucide-react";
 
-type Status =
-  | "applied"
-  | "screening"
-  | "interview"
-  | "technical_test"
-  | "offer"
-  | "rejected"
-  | "ghosting";
+import { STATUS_META, type AppStatus } from "@/lib/applicationStatus";
+
+type Status = AppStatus;
 
 type Application = {
   id: string;
@@ -66,17 +61,37 @@ const data: Application[] = [
     appliedAt: "2025-12-10",
     lastUpdate: "2025-12-12",
   },
+  {
+    id: "a4",
+    company: "Fintech C",
+    role: "Junior Software Engineer",
+    location: "Jakarta",
+    workSetup: "Hybrid",
+    status: "ghosting",
+    appliedAt: "2025-11-20",
+    lastUpdate: "2025-11-25",
+  },
+  {
+    id: "a5",
+    company: "Agency D",
+    role: "React Developer",
+    location: "Tangerang",
+    workSetup: "Onsite",
+    status: "rejected",
+    appliedAt: "2025-12-01",
+    lastUpdate: "2025-12-05",
+  },
 ];
 
 const statusTabs: Array<{ key: "all" | Status; label: string }> = [
   { key: "all", label: "All" },
-  { key: "applied", label: "Applied" },
-  { key: "screening", label: "Screening" },
-  { key: "interview", label: "Interview" },
+  { key: "applied", label: STATUS_META.applied.label },
+  { key: "screening", label: STATUS_META.screening.label },
+  { key: "interview", label: STATUS_META.interview.label },
   { key: "technical_test", label: "Test" },
-  { key: "offer", label: "Offer" },
-  { key: "ghosting", label: "Ghosting" },
-  { key: "rejected", label: "Rejected" },
+  { key: "offer", label: STATUS_META.offer.label },
+  { key: "ghosting", label: STATUS_META.ghosting.label },
+  { key: "rejected", label: STATUS_META.rejected.label },
 ];
 
 type SortKey = "lastUpdateDesc" | "companyAsc" | "nextEventAsc" | "statusAsc";
@@ -88,6 +103,22 @@ const sortOptions: Array<{ key: SortKey; label: string }> = [
   { key: "statusAsc", label: "Status" },
 ];
 
+const statusMeta = (
+  [
+    "applied",
+    "screening",
+    "interview",
+    "technical_test",
+    "offer",
+    "ghosting",
+    "rejected",
+  ] as const
+).map((key) => ({
+  key,
+  label: STATUS_META[key].label,
+  barClass: STATUS_META[key].dot,
+}));
+
 function countByStatus(rows: Application[]) {
   const init: Record<Status, number> = {
     applied: 0,
@@ -97,9 +128,14 @@ function countByStatus(rows: Application[]) {
     offer: 0,
     rejected: 0,
     ghosting: 0,
+    hired: 0,
+    withdrawn: 0,
   };
 
-  for (const r of rows) init[r.status] += 1;
+  for (const r of rows) {
+    const k = r.status as Status;
+    if (k in init) init[k] += 1;
+  }
   return init;
 }
 
@@ -160,6 +196,19 @@ export default function ApplicationsPage() {
 
   const stats = useMemo(() => countByStatus(filtered), [filtered]);
   const nextUp = useMemo(() => getNextUpcoming(filtered), [filtered]);
+
+  const total = filtered.length;
+
+  const distribution = useMemo(() => {
+    if (total === 0) return [];
+    return statusMeta
+      .map((s) => ({
+        ...s,
+        count: stats[s.key],
+        pct: (stats[s.key] / total) * 100,
+      }))
+      .filter((x) => x.count > 0);
+  }, [stats, total]);
 
   return (
     <div className="space-y-5">
@@ -341,6 +390,54 @@ export default function ApplicationsPage() {
         </Card>
       </div>
 
+      {/* Status distribution */}
+      <Card className="rounded-2xl border-slate-200/70 bg-white/70 shadow-sm backdrop-blur">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">
+                Status distribution
+              </p>
+              <p className="text-xs text-slate-500">
+                Breakdown based on current filter.
+              </p>
+            </div>
+            <p className="text-xs text-slate-500">
+              Total: <span className="font-medium text-slate-800">{total}</span>
+            </p>
+          </div>
+
+          <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-slate-100">
+            {total === 0 ? (
+              <div className="h-full w-full bg-slate-200" />
+            ) : (
+              distribution.map((d) => (
+                <div
+                  key={d.key}
+                  className={`h-full ${d.barClass} inline-block`}
+                  style={{ width: `${d.pct}%` }}
+                  title={`${d.label}: ${d.count}`}
+                />
+              ))
+            )}
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            {statusMeta.map((s) => (
+              <button
+                key={s.key}
+                onClick={() => setActiveStatus(s.key)}
+                className="flex items-center gap-2 rounded-full border border-slate-200/70 bg-white/60 px-3 py-1 text-xs text-slate-700 hover:bg-white"
+              >
+                <span className={`h-2 w-2 rounded-full ${s.barClass}`} />
+                <span className="font-medium">{s.label}</span>
+                <span className="text-slate-500">({stats[s.key]})</span>
+              </button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Quick Actions */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs text-slate-500">Quick actions:</div>
@@ -431,8 +528,38 @@ export default function ApplicationsPage() {
         ))}
 
         {filtered.length === 0 && (
-          <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-10 text-center text-sm text-slate-600 shadow-sm backdrop-blur">
-            No applications found. Try a different keyword or filter.
+          <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-10 text-center shadow-sm backdrop-blur">
+            <p className="text-sm font-semibold text-slate-900">
+              Nothing here yet
+            </p>
+            <p className="mt-2 text-sm text-slate-600">
+              {query.trim()
+                ? "No results match your keyword. Try a different search."
+                : activeStatus !== "all"
+                ? `No applications in "${activeStatus}" status yet.`
+                : "Start by adding your first application."}
+            </p>
+
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              <Button
+                className="rounded-xl bg-indigo-600 hover:bg-indigo-700"
+                asChild
+              >
+                <Link href="/dashboard/applications/new">Add application</Link>
+              </Button>
+
+              <Button
+                variant="outline"
+                className="rounded-xl border-slate-200 bg-white/60"
+                onClick={() => {
+                  setQuery("");
+                  setActiveStatus("all");
+                  setSortKey("lastUpdateDesc");
+                }}
+              >
+                Reset filters
+              </Button>
+            </div>
           </div>
         )}
       </div>

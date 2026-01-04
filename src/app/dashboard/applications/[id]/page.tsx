@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -8,27 +9,25 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import StatusBadge from "@/components/ui/Statusbadge";
 import ClientDateTime from "@/components/common/ClientDateTime";
-
-type Stage =
-  | "applied"
-  | "screening"
-  | "interview"
-  | "test"
-  | "offered"
-  | "hired"
-  | "rejected"
-  | "withdrawn"
-  | "ghosting";
+import { STATUS_META, type AppStatus } from "@/lib/applicationStatus";
+import {
+  CheckCircle2,
+  ClipboardList,
+  MessageSquare,
+  TestTube2,
+  Gift,
+  XCircle,
+  Ghost,
+} from "lucide-react";
 
 type InterviewType = "hr" | "user" | "technical" | "cultural" | "other";
 type TestType = "live_code" | "take_home" | "offline" | "psychotest" | "other";
-
 type EventMode = "online" | "offline";
 
 type TimelineEvent = {
   id: string;
-  stage: Stage;
-  detail?: InterviewType | TestType; // sub-type for interview/test
+  stage: AppStatus;
+  detail?: InterviewType | TestType;
   at: string; // ISO
   mode?: EventMode;
   meetLink?: string;
@@ -36,16 +35,14 @@ type TimelineEvent = {
   notes?: string;
 };
 
-const stageOptions: Array<{ value: Stage; label: string }> = [
-  { value: "applied", label: "Applied" },
-  { value: "screening", label: "Screening" },
-  { value: "interview", label: "Interview" },
-  { value: "test", label: "Test" },
-  { value: "offered", label: "Offered" },
-  { value: "hired", label: "Hired" },
-  { value: "rejected", label: "Rejected" },
-  { value: "withdrawn", label: "Withdrawn" },
-  { value: "ghosting", label: "Ghosting" },
+const stageOptions: Array<{ value: AppStatus; label: string }> = [
+  { value: "applied", label: STATUS_META.applied.label },
+  { value: "screening", label: STATUS_META.screening.label },
+  { value: "interview", label: STATUS_META.interview.label },
+  { value: "technical_test", label: STATUS_META.technical_test.label },
+  { value: "offer", label: STATUS_META.offer.label },
+  { value: "ghosting", label: STATUS_META.ghosting.label },
+  { value: "rejected", label: STATUS_META.rejected.label },
 ];
 
 const interviewOptions: Array<{ value: InterviewType; label: string }> = [
@@ -79,16 +76,37 @@ function prettyDetail(detail?: string) {
   return detail.replaceAll("_", " ").toUpperCase();
 }
 
+function stageIcon(stage: AppStatus) {
+  const cls = "h-4 w-4";
+  switch (stage) {
+    case "applied":
+      return <ClipboardList className={cls} />;
+    case "screening":
+      return <MessageSquare className={cls} />;
+    case "interview":
+      return <CheckCircle2 className={cls} />;
+    case "technical_test":
+      return <TestTube2 className={cls} />;
+    case "offer":
+      return <Gift className={cls} />;
+    case "rejected":
+      return <XCircle className={cls} />;
+    case "ghosting":
+      return <Ghost className={cls} />;
+    default:
+      return <ClipboardList className={cls} />;
+  }
+}
+
 export default function ApplicationDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params?.id ?? "unknown";
 
-  // Dummy application
   const [app, setApp] = useState({
     id,
     company: "PT Example",
     role: "Frontend Developer",
-    status: "interview" as Stage,
+    status: "interview" as AppStatus,
     statusDetail: "hr" as InterviewType | TestType | undefined,
     location: "Jakarta (Hybrid)",
     source: "LinkedIn",
@@ -99,7 +117,6 @@ export default function ApplicationDetailPage() {
       "HR mentioned they focus on product speed. Prepare project story + system design basic.",
   });
 
-  // Dummy timeline
   const [events, setEvents] = useState<TimelineEvent[]>([
     {
       id: "e1",
@@ -120,34 +137,27 @@ export default function ApplicationDetailPage() {
 
   // Form state
   const nowLocal = useMemo(() => toDatetimeLocalValue(new Date()), []);
-  const [stage, setStage] = useState<Stage>(app.status);
+  const [stage, setStage] = useState<AppStatus>(app.status);
 
   const [interviewType, setInterviewType] = useState<InterviewType>(
-    app.status === "interview" &&
-      app.statusDetail &&
-      !String(app.statusDetail).includes("_")
+    app.status === "interview" && app.statusDetail
       ? (app.statusDetail as InterviewType)
       : "hr"
   );
+  const [testType, setTestType] = useState<TestType>("live_code");
 
-  const [testType, setTestType] = useState<TestType>(
-    app.status === "test" && app.statusDetail
-      ? (app.statusDetail as TestType)
-      : "live_code"
-  );
-
-  const [at, setAt] = useState<string>(nowLocal); // datetime-local
+  const [at, setAt] = useState<string>(nowLocal);
   const [mode, setMode] = useState<EventMode>("online");
   const [meetLink, setMeetLink] = useState("");
   const [place, setPlace] = useState("");
   const [eventNotes, setEventNotes] = useState("");
 
-  const needsMode = stage === "interview" || stage === "test";
+  const needsMode = stage === "interview" || stage === "technical_test";
 
   const selectedDetail: InterviewType | TestType | undefined =
     stage === "interview"
       ? interviewType
-      : stage === "test"
+      : stage === "technical_test"
       ? testType
       : undefined;
 
@@ -169,17 +179,14 @@ export default function ApplicationDetailPage() {
       notes: eventNotes.trim() || undefined,
     };
 
-    // Update current status on application
     setApp((prev) => ({
       ...prev,
       status: stage,
       statusDetail: selectedDetail,
     }));
 
-    // Add event (newest first)
     setEvents((prev) => [newEvent, ...prev]);
 
-    // Reset lightweight fields
     setAt(toDatetimeLocalValue(new Date()));
     setMeetLink("");
     setPlace("");
@@ -188,7 +195,14 @@ export default function ApplicationDetailPage() {
 
   return (
     <div className="space-y-6">
-      {/* header */}
+      {/* Back */}
+      <div className="flex items-center justify-between">
+        <Button variant="outline" className="rounded-xl" asChild>
+          <Link href="/dashboard/applications">← Back</Link>
+        </Button>
+      </div>
+
+      {/* Header */}
       <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-5 shadow-sm backdrop-blur">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -202,11 +216,12 @@ export default function ApplicationDetailPage() {
             </p>
 
             {app.statusDetail &&
-              (app.status === "interview" || app.status === "test") && (
+              (app.status === "interview" ||
+                app.status === "technical_test") && (
                 <p className="mt-2 text-xs text-slate-600">
                   Current:{" "}
                   <span className="font-medium text-slate-800">
-                    {app.status.toUpperCase()} ·{" "}
+                    {STATUS_META[app.status].label} ·{" "}
                     {prettyDetail(app.statusDetail)}
                   </span>
                 </p>
@@ -217,7 +232,7 @@ export default function ApplicationDetailPage() {
         </div>
       </div>
 
-      {/* update stage */}
+      {/* Update stage */}
       <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-5 shadow-sm backdrop-blur">
         <h2 className="text-sm font-semibold text-slate-900">Update stage</h2>
         <p className="mt-1 text-xs text-slate-600">
@@ -226,13 +241,12 @@ export default function ApplicationDetailPage() {
         </p>
 
         <div className="mt-4 grid gap-4 md:grid-cols-3">
-          {/* stage */}
           <div className="space-y-2">
             <Label>Stage</Label>
             <select
               className="h-10 w-full rounded-xl border border-slate-200 bg-white/60 px-3 text-sm outline-none focus:ring-2 focus:ring-indigo-200"
               value={stage}
-              onChange={(e) => setStage(e.target.value as Stage)}
+              onChange={(e) => setStage(e.target.value as AppStatus)}
             >
               {stageOptions.map((s) => (
                 <option key={s.value} value={s.value}>
@@ -242,7 +256,6 @@ export default function ApplicationDetailPage() {
             </select>
           </div>
 
-          {/* time */}
           <div className="space-y-2">
             <Label>Time</Label>
             <Input
@@ -256,7 +269,6 @@ export default function ApplicationDetailPage() {
             </p>
           </div>
 
-          {/* mode */}
           <div className="space-y-2">
             <Label>Mode</Label>
             {needsMode ? (
@@ -274,8 +286,7 @@ export default function ApplicationDetailPage() {
           </div>
         </div>
 
-        {/* sub-options */}
-        {(stage === "interview" || stage === "test") && (
+        {(stage === "interview" || stage === "technical_test") && (
           <div className="mt-4 grid gap-4 md:grid-cols-3">
             {stage === "interview" ? (
               <div className="space-y-2 md:col-span-1">
@@ -311,7 +322,6 @@ export default function ApplicationDetailPage() {
               </div>
             )}
 
-            {/* online/offline fields */}
             {mode === "online" ? (
               <div className="space-y-2 md:col-span-2">
                 <Label>Meet link</Label>
@@ -336,11 +346,10 @@ export default function ApplicationDetailPage() {
           </div>
         )}
 
-        {/* notes */}
         <div className="mt-4 space-y-2">
           <Label>Notes</Label>
           <Textarea
-            placeholder="What happened? What to prepare next? Any special instruction?"
+            placeholder="What happened? What to prepare next?"
             className="min-h-22.5 rounded-xl bg-white/60"
             value={eventNotes}
             onChange={(e) => setEventNotes(e.target.value)}
@@ -357,115 +366,104 @@ export default function ApplicationDetailPage() {
         </div>
       </div>
 
-      {/* company + requirements */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="md:col-span-2 rounded-2xl border border-slate-200/70 bg-white/70 p-5 shadow-sm backdrop-blur">
-          <h2 className="text-sm font-semibold text-slate-900">
-            Company details
-          </h2>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <div className="rounded-xl border border-slate-200/70 bg-white/60 p-4">
-              <p className="text-xs text-slate-500">Job post link</p>
-              <p className="mt-1 text-sm text-slate-700 break-all">
-                {app.jobLink}
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-slate-200/70 bg-white/60 p-4">
-              <p className="text-xs text-slate-500">Application notes</p>
-              <p className="mt-1 text-sm text-slate-700">{app.notes}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-5 shadow-sm backdrop-blur">
-          <h2 className="text-sm font-semibold text-slate-900">Requirements</h2>
-
-          <div className="mt-4">
-            <p className="text-xs text-slate-500">Required skills</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {app.requiredSkills.map((s) => (
-                <span
-                  key={s}
-                  className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700"
-                >
-                  {s}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-5">
-            <p className="text-xs text-slate-500">Nice to have</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {app.niceToHave.map((s) => (
-                <span
-                  key={s}
-                  className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700"
-                >
-                  {s}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* timeline */}
       <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-5 shadow-sm backdrop-blur">
-        <h2 className="text-sm font-semibold text-slate-900">Timeline</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-900">Timeline</h2>
+          <p className="text-xs text-slate-500">Latest updates on top</p>
+        </div>
 
-        <div className="mt-4 space-y-3">
-          {events.map((e) => (
-            <div
-              key={e.id}
-              className="rounded-2xl border border-slate-200/70 bg-white/60 p-4"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  {/* ✅ FIX HYDRATION: gunakan ClientDateTime */}
-                  <p className="text-xs text-slate-600">
-                    <ClientDateTime value={e.at} />
-                  </p>
+        <div className="mt-5 space-y-5">
+          {events.map((e, idx) => {
+            const meta =
+              STATUS_META[e.stage] ??
+              ({
+                label: e.stage,
+                dot: "bg-slate-300",
+                badge: "bg-slate-100",
+                text: "text-slate-700",
+              } as const);
 
-                  <p className="mt-1 text-sm font-semibold text-slate-900">
-                    {stageOptions.find((s) => s.value === e.stage)?.label ??
-                      e.stage}
-                    {e.detail ? (
-                      <span className="ml-2 text-xs font-medium text-slate-600">
-                        · {prettyDetail(String(e.detail))}
-                      </span>
-                    ) : null}
-                  </p>
+            const isLast = idx === events.length - 1;
 
-                  {e.stage === "interview" || e.stage === "test" ? (
-                    <>
-                      {e.mode === "online" && e.meetLink ? (
-                        <p className="mt-1 text-sm text-slate-600 break-all">
-                          Online · {e.meetLink}
-                        </p>
-                      ) : null}
+            return (
+              <div key={e.id} className="relative flex gap-4">
+                {/* Left rail */}
+                <div className="relative flex w-10 flex-col items-center">
+                  <div
+                    className={[
+                      "flex h-9 w-9 items-center justify-center rounded-full",
+                      meta.badge,
+                      meta.text,
+                      "ring-1 ring-slate-200",
+                    ].join(" ")}
+                  >
+                    {stageIcon(e.stage)}
+                  </div>
 
-                      {e.mode === "offline" && e.location ? (
-                        <p className="mt-1 text-sm text-slate-600">
-                          Offline · {e.location}
-                        </p>
-                      ) : null}
-                    </>
-                  ) : null}
-
-                  {e.notes ? (
-                    <p className="mt-2 text-sm text-slate-600">{e.notes}</p>
-                  ) : null}
+                  {!isLast && (
+                    <div className="mt-2 h-full w-0.5 bg-slate-200" />
+                  )}
                 </div>
 
-                <div className="shrink-0">
-                  <StatusBadge status={e.stage} />
+                {/* Content */}
+                <div className="min-w-0 flex-1 rounded-2xl border border-slate-200/70 bg-white/60 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={["h-2 w-2 rounded-full", meta.dot].join(
+                            " "
+                          )}
+                        />
+                        <p className="text-sm font-semibold text-slate-900">
+                          {meta.label}
+                          {e.detail ? (
+                            <span className="ml-2 text-xs font-medium text-slate-600">
+                              · {prettyDetail(String(e.detail))}
+                            </span>
+                          ) : null}
+                        </p>
+                      </div>
+
+                      <p className="mt-1 text-xs text-slate-600">
+                        <ClientDateTime value={e.at} />
+                      </p>
+
+                      {(e.stage === "interview" ||
+                        e.stage === "technical_test") && (
+                        <div className="mt-2 space-y-1">
+                          {e.mode === "online" && e.meetLink ? (
+                            <p className="text-sm text-slate-600 break-all">
+                              Online · {e.meetLink}
+                            </p>
+                          ) : null}
+                          {e.mode === "offline" && e.location ? (
+                            <p className="text-sm text-slate-600">
+                              Offline · {e.location}
+                            </p>
+                          ) : null}
+                        </div>
+                      )}
+
+                      {e.notes ? (
+                        <p className="mt-3 text-sm text-slate-600">{e.notes}</p>
+                      ) : null}
+                    </div>
+
+                    <div className="shrink-0">
+                      <StatusBadge status={e.stage} />
+                    </div>
+                  </div>
                 </div>
               </div>
+            );
+          })}
+
+          {events.length === 0 && (
+            <div className="rounded-2xl border border-slate-200/70 bg-white/60 p-8 text-center text-sm text-slate-600">
+              No timeline yet. Add your first stage update above.
             </div>
-          ))}
+          )}
         </div>
       </div>
     </div>
