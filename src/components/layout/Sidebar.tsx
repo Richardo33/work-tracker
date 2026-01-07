@@ -1,11 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { LayoutDashboard, ListChecks, CalendarDays, User } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
+import {
+  LayoutDashboard,
+  KanbanSquare,
+  ListChecks,
+  CalendarDays,
+  User,
+  LogOut,
+} from "lucide-react";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/dashboard/tracker", label: "Tracker", icon: KanbanSquare },
   { href: "/dashboard/applications", label: "Applications", icon: ListChecks },
   { href: "/dashboard/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/dashboard/profile", label: "Profile", icon: User },
@@ -13,6 +22,20 @@ const nav = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      router.push("/login");
+      router.refresh();
+    } finally {
+      setLoggingOut(false);
+    }
+  }
 
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-slate-200/70 bg-white/70 backdrop-blur md:block">
@@ -70,6 +93,33 @@ export default function Sidebar() {
               Add an event for every interview to stay on track.
             </p>
           </div>
+
+          {/* Logout (same size as nav items) */}
+          <button
+            type="button"
+            onClick={handleLogout}
+            disabled={loggingOut}
+            className={[
+              "mt-3 w-full rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-sm transition",
+              "group flex items-center gap-3",
+              "hover:border-slate-200", // tetap netral
+              "disabled:cursor-not-allowed disabled:opacity-60",
+            ].join(" ")}
+          >
+            <span
+              className={[
+                "inline-flex h-9 w-9 items-center justify-center rounded-xl transition",
+                "bg-slate-100 text-slate-700 group-hover:bg-white",
+                "group-hover:text-red-600", // icon jadi merah
+              ].join(" ")}
+            >
+              <LogOut className="h-4 w-4" />
+            </span>
+
+            <span className="font-medium text-slate-700 group-hover:text-red-600">
+              {loggingOut ? "Logging out..." : "Logout"}
+            </span>
+          </button>
         </div>
       </div>
     </aside>

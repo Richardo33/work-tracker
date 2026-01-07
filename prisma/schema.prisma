@@ -1,0 +1,174 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")            // pooled (-pooler) buat runtime
+  directUrl = env("DATABASE_URL_UNPOOLED")   // non-pooler buat migrate
+}
+
+enum WorkSetup {
+  Onsite
+  Hybrid
+  Remote
+}
+
+enum AppStatus {
+  applied
+  screening
+  interview
+  technical_test
+  offer
+  rejected
+  ghosting
+  hired
+  withdrawn
+}
+
+enum InterviewType {
+  hr
+  user
+  technical
+  cultural
+  other
+}
+
+enum TestType {
+  live_code
+  take_home
+  offline
+  psychotest
+  other
+}
+
+enum EventType {
+  interview_hr
+  interview_user
+  technical_test
+  psychotest
+  offer
+  follow_up
+  other
+}
+
+enum LocationType {
+  online
+  offline
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profile        Profile?
+  applications   Application[]
+  calendarEvents CalendarEvent[]
+}
+
+
+model Profile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+
+  name      String?
+  headline  String?
+  location  String?
+  bio       String?
+  avatarUrl String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Application {
+  id             String     @id @default(uuid())
+  userId         String
+
+  company        String
+  role           String
+  location       String
+  workSetup      WorkSetup
+  status         AppStatus
+
+  // optional detail yang kamu pakai di tracker/detail
+  statusDetail   String?    // bisa isi "hr" / "live_code" / dll
+  source         String?
+  jobLink        String?
+  notes          String?
+
+  requiredSkills String[]   // dari requiredSkills: ["React", ...]
+  niceToHave     String[]   // dari niceToHave: ["Next.js", ...]
+
+  appliedAt      DateTime
+  lastUpdate     DateTime
+  nextEventAt    DateTime?
+  nextEventTitle String?
+
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  timeline       ApplicationTimelineEvent[]
+  calendarEvents CalendarEvent[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([nextEventAt])
+}
+
+model ApplicationTimelineEvent {
+  id            String    @id @default(uuid())
+  applicationId String
+
+  stage         AppStatus
+  // detail ini di UI kamu: InterviewType | TestType (opsional)
+  detail        String?   // misal "hr" / "live_code" / "offline"
+  mode          LocationType?
+  meetLink      String?
+  location      String?
+  notes         String?
+
+  at            DateTime
+
+  createdAt     DateTime  @default(now())
+
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@index([at])
+}
+
+model CalendarEvent {
+  id            String       @id @default(uuid())
+  userId        String
+  applicationId String?
+
+  title         String
+  type          EventType
+  company       String?
+
+  startAt       DateTime
+  endAt         DateTime?
+
+  locationType  LocationType?
+  meetLink      String?
+  place         String?
+  note          String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([startAt])
+  @@index([applicationId])
+}

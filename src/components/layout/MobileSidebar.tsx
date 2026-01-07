@@ -1,20 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
+  KanbanSquare,
   ListChecks,
   CalendarDays,
   User,
   Menu,
   X,
+  LogOut,
 } from "lucide-react";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/dashboard/tracker", label: "Tracker", icon: KanbanSquare },
   { href: "/dashboard/applications", label: "Applications", icon: ListChecks },
   { href: "/dashboard/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/dashboard/profile", label: "Profile", icon: User },
@@ -22,7 +25,22 @@ const nav = [
 
 export default function MobileSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      setOpen(false);
+      router.push("/login");
+      router.refresh();
+    } finally {
+      setLoggingOut(false);
+    }
+  }
 
   return (
     <>
@@ -47,7 +65,6 @@ export default function MobileSidebar() {
             </div>
           </Link>
 
-          {/* spacer to balance */}
           <div className="h-10 w-10" />
         </div>
       </div>
@@ -139,6 +156,31 @@ export default function MobileSidebar() {
                 Add an event for every interview to stay on track.
               </p>
             </div>
+
+            {/* Logout */}
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className={cn(
+                "mt-3 w-full rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-sm transition",
+                "group flex items-center gap-3",
+                "disabled:cursor-not-allowed disabled:opacity-60"
+              )}
+            >
+              <span
+                className={cn(
+                  "inline-flex h-9 w-9 items-center justify-center rounded-xl transition",
+                  "bg-slate-100 text-slate-700 group-hover:bg-white group-hover:text-red-600"
+                )}
+              >
+                <LogOut className="h-4 w-4" />
+              </span>
+
+              <span className="font-medium text-slate-700 group-hover:text-red-600">
+                {loggingOut ? "Logging out..." : "Logout"}
+              </span>
+            </button>
           </div>
         </div>
       </aside>
