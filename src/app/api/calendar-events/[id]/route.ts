@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+// src/app/api/calendar-events/[id]/route.ts
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/server-auth";
 import { EventType, LocationType, Prisma } from "@prisma/client";
@@ -88,13 +89,16 @@ type PatchBody = {
   applicationId?: string | null;
 };
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+// ✅ Next terbaru: params bisa berupa Promise
+type Params = { id: string };
+type RouteCtx = { params: Params | Promise<Params> };
+
+export async function PATCH(req: NextRequest, { params }: RouteCtx) {
   try {
     const userId = await requireUserId();
-    const id = params.id;
+
+    // ✅ FIX: handle params Promise vs object
+    const { id } = await Promise.resolve(params);
 
     const exists = await prisma.calendarEvent.findFirst({
       where: { id, userId },
@@ -184,7 +188,7 @@ export async function PATCH(
       nextLocationType = body.locationType ?? null;
     }
 
-    // ✅ FIX: update relasi application via connect/disconnect (bukan applicationId)
+    // ✅ update relasi application via connect/disconnect (bukan applicationId)
     if (typeof body.applicationId !== "undefined") {
       const appId = body.applicationId?.trim() || null;
 
@@ -201,7 +205,6 @@ export async function PATCH(
         }
         data.application = { connect: { id: appId } };
       } else {
-        // detach
         data.application = { disconnect: true };
       }
     }
@@ -251,13 +254,12 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
-  _req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(_req: NextRequest, { params }: RouteCtx) {
   try {
     const userId = await requireUserId();
-    const id = params.id;
+
+    // ✅ FIX: handle params Promise vs object
+    const { id } = await Promise.resolve(params);
 
     const exists = await prisma.calendarEvent.findFirst({
       where: { id, userId },
