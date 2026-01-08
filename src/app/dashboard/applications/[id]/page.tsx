@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,12 +27,31 @@ type EventMode = "online" | "offline";
 type TimelineEvent = {
   id: string;
   stage: AppStatus;
-  detail?: InterviewType | TestType;
+  detail?: string | null;
   at: string; // ISO
-  mode?: EventMode;
-  meetLink?: string;
-  location?: string;
-  notes?: string;
+  mode?: EventMode | null;
+  meetLink?: string | null;
+  location?: string | null;
+  notes?: string | null;
+};
+
+type AppDetail = {
+  id: string;
+  company: string;
+  role: string;
+  location: string;
+  workSetup: "Onsite" | "Hybrid" | "Remote";
+  status: AppStatus;
+  statusDetail?: string | null;
+
+  source?: string | null;
+  jobLink?: string | null;
+  requiredSkills: string[];
+  niceToHave: string[];
+  notes?: string | null;
+
+  appliedAt: string;
+  lastUpdate: string;
 };
 
 const stageOptions: Array<{ value: AppStatus; label: string }> = [
@@ -71,7 +90,7 @@ function toDatetimeLocalValue(date: Date) {
   return `${yyyy}-${MM}-${dd}T${hh}:${mm}`;
 }
 
-function prettyDetail(detail?: string) {
+function prettyDetail(detail?: string | null) {
   if (!detail) return "";
   return detail.replaceAll("_", " ").toUpperCase();
 }
@@ -99,98 +118,204 @@ function stageIcon(stage: AppStatus) {
 }
 
 export default function ApplicationDetailPage() {
+  const router = useRouter();
   const params = useParams<{ id: string }>();
-  const id = params?.id ?? "unknown";
+  const id = params?.id;
 
-  const [app, setApp] = useState({
-    id,
-    company: "PT Example",
-    role: "Frontend Developer",
-    status: "interview" as AppStatus,
-    statusDetail: "hr" as InterviewType | TestType | undefined,
-    location: "Jakarta (Hybrid)",
-    source: "LinkedIn",
-    jobLink: "https://linkedin.com/jobs/xxxx",
-    requiredSkills: ["React", "TypeScript", "Tailwind", "REST API"],
-    niceToHave: ["Next.js", "Testing", "CI/CD"],
-    notes:
-      "HR mentioned they focus on product speed. Prepare project story + system design basic.",
-  });
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [events, setEvents] = useState<TimelineEvent[]>([
-    {
-      id: "e1",
-      stage: "applied",
-      at: new Date("2025-12-21T09:30:00").toISOString(),
-      notes: "Applied via LinkedIn.",
-    },
-    {
-      id: "e2",
-      stage: "interview",
-      detail: "hr",
-      at: new Date("2026-01-04T14:00:00").toISOString(),
-      mode: "online",
-      meetLink: "https://meet.google.com/xxx-xxxx-xxx",
-      notes: "Prepare intro + portfolio story.",
-    },
-  ]);
+  const [app, setApp] = useState<AppDetail | null>(null);
+  const [events, setEvents] = useState<TimelineEvent[]>([]);
 
   // Form state
   const nowLocal = useMemo(() => toDatetimeLocalValue(new Date()), []);
-  const [stage, setStage] = useState<AppStatus>(app.status);
-
-  const [interviewType, setInterviewType] = useState<InterviewType>(
-    app.status === "interview" && app.statusDetail
-      ? (app.statusDetail as InterviewType)
-      : "hr"
-  );
+  const [stage, setStage] = useState<AppStatus>("applied");
+  const [interviewType, setInterviewType] = useState<InterviewType>("hr");
   const [testType, setTestType] = useState<TestType>("live_code");
-
   const [at, setAt] = useState<string>(nowLocal);
   const [mode, setMode] = useState<EventMode>("online");
   const [meetLink, setMeetLink] = useState("");
   const [place, setPlace] = useState("");
   const [eventNotes, setEventNotes] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const needsMode = stage === "interview" || stage === "technical_test";
-
-  const selectedDetail: InterviewType | TestType | undefined =
+  const selectedDetail: string | undefined =
     stage === "interview"
       ? interviewType
       : stage === "technical_test"
       ? testType
       : undefined;
 
-  function handleSaveStage() {
-    const iso = new Date(at).toISOString();
+  useEffect(() => {
+    if (!id) return;
 
-    const newEvent: TimelineEvent = {
-      id: crypto.randomUUID(),
-      stage,
-      detail: selectedDetail,
-      at: iso,
-      mode: needsMode ? mode : undefined,
-      meetLink:
-        needsMode && mode === "online"
-          ? meetLink.trim() || undefined
-          : undefined,
-      location:
-        needsMode && mode === "offline" ? place.trim() || undefined : undefined,
-      notes: eventNotes.trim() || undefined,
-    };
+    const ac = new AbortController();
 
-    setApp((prev) => ({
-      ...prev,
-      status: stage,
-      statusDetail: selectedDetail,
-    }));
+    async function run() {
+      try {
+        setLoading(true);
+        setLoadError(null);
 
-    setEvents((prev) => [newEvent, ...prev]);
+        const res = await fetch(`/api/applications/${id}`, {
+          method: "GET",
+          cache: "no-store",
+          signal: ac.signal,
+        });
 
-    setAt(toDatetimeLocalValue(new Date()));
-    setMeetLink("");
-    setPlace("");
-    setEventNotes("");
+        if (res.status === 401) {
+          router.replace("/login");
+          return;
+        }
+
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || `HTTP ${res.status}`);
+        }
+
+        const json = (await res.json()) as {
+          application: AppDetail;
+          timeline: TimelineEvent[];
+        };
+
+        setApp(json.application);
+        setEvents(json.timeline ?? []);
+
+        // init form based on current status
+        setStage(json.application.status);
+
+        if (
+          json.application.status === "interview" &&
+          json.application.statusDetail
+        ) {
+          setInterviewType(json.application.statusDetail as InterviewType);
+        } else {
+          setInterviewType("hr");
+        }
+
+        if (
+          json.application.status === "technical_test" &&
+          json.application.statusDetail
+        ) {
+          setTestType(json.application.statusDetail as TestType);
+        } else {
+          setTestType("live_code");
+        }
+      } catch (e) {
+        if (ac.signal.aborted) return;
+        setLoadError(e instanceof Error ? e.message : "Failed to load");
+      } finally {
+        if (!ac.signal.aborted) setLoading(false);
+      }
+    }
+
+    run();
+    return () => ac.abort();
+  }, [id, router]);
+
+  async function handleSaveStage() {
+    if (!id || !app) return;
+
+    try {
+      setSaving(true);
+
+      const iso = new Date(at).toISOString();
+
+      const payload = {
+        stage,
+        detail: selectedDetail,
+        at: iso,
+        mode: needsMode ? mode : undefined,
+        meetLink: needsMode && mode === "online" ? meetLink.trim() : undefined,
+        location: needsMode && mode === "offline" ? place.trim() : undefined,
+        notes: eventNotes.trim() || undefined,
+      };
+
+      const res = await fetch(`/api/applications/${id}/timeline`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.status === 401) {
+        router.replace("/login");
+        return;
+      }
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+
+      const json = (await res.json()) as {
+        application: AppDetail;
+        event: TimelineEvent;
+      };
+
+      setApp(json.application);
+
+      // merge + keep "latest updates on top" by `at`
+      setEvents((prev) => {
+        const merged = [
+          json.event,
+          ...prev.filter((x) => x.id !== json.event.id),
+        ];
+        merged.sort(
+          (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()
+        );
+        return merged;
+      });
+
+      // reset form
+      setAt(toDatetimeLocalValue(new Date()));
+      setMeetLink("");
+      setPlace("");
+      setEventNotes("");
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <Button variant="outline" className="rounded-xl" asChild>
+          <Link href="/dashboard/applications">← Back</Link>
+        </Button>
+
+        <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-6 shadow-sm backdrop-blur">
+          <p className="text-sm text-slate-600">Loading application...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError || !app) {
+    return (
+      <div className="space-y-4">
+        <Button variant="outline" className="rounded-xl" asChild>
+          <Link href="/dashboard/applications">← Back</Link>
+        </Button>
+
+        <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-6 shadow-sm backdrop-blur">
+          <p className="text-sm text-slate-700">
+            Error:{" "}
+            <span className="font-medium">{loadError ?? "Not found"}</span>
+          </p>
+          <div className="mt-4">
+            <Button
+              className="rounded-xl bg-indigo-600 hover:bg-indigo-700"
+              onClick={() => window.location.reload()}
+            >
+              Retry
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -211,8 +336,10 @@ export default function ApplicationDetailPage() {
               {app.company}
             </h1>
             <p className="mt-1 text-sm text-slate-600">{app.role}</p>
+
             <p className="mt-3 text-xs text-slate-500">
-              {app.location} · Source: {app.source}
+              {app.location} · {app.workSetup}
+              {app.source ? ` · Source: ${app.source}` : ""}
             </p>
 
             {app.statusDetail &&
@@ -226,10 +353,77 @@ export default function ApplicationDetailPage() {
                   </span>
                 </p>
               )}
+
+            <p className="mt-2 text-xs text-slate-500">
+              Applied: <ClientDateTime value={app.appliedAt} showTime={false} />{" "}
+              · Last update:{" "}
+              <ClientDateTime value={app.lastUpdate} showTime={false} />
+            </p>
+
+            {app.jobLink ? (
+              <p className="mt-2 text-xs">
+                <a
+                  href={app.jobLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-indigo-700 hover:underline"
+                >
+                  Open job link →
+                </a>
+              </p>
+            ) : null}
           </div>
 
           <StatusBadge status={app.status} />
         </div>
+
+        {/* Skills */}
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200/70 bg-white/60 p-4">
+            <p className="text-xs font-medium text-slate-600">
+              Required skills
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {app.requiredSkills.length ? (
+                app.requiredSkills.map((s) => (
+                  <span
+                    key={s}
+                    className="rounded-full border border-slate-200/70 bg-white px-3 py-1 text-xs text-slate-700"
+                  >
+                    {s}
+                  </span>
+                ))
+              ) : (
+                <span className="text-xs text-slate-500">-</span>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200/70 bg-white/60 p-4">
+            <p className="text-xs font-medium text-slate-600">Nice to have</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {app.niceToHave.length ? (
+                app.niceToHave.map((s) => (
+                  <span
+                    key={s}
+                    className="rounded-full border border-slate-200/70 bg-white px-3 py-1 text-xs text-slate-700"
+                  >
+                    {s}
+                  </span>
+                ))
+              ) : (
+                <span className="text-xs text-slate-500">-</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {app.notes ? (
+          <div className="mt-3 rounded-2xl border border-slate-200/70 bg-white/60 p-4">
+            <p className="text-xs font-medium text-slate-600">Notes</p>
+            <p className="mt-2 text-sm text-slate-700">{app.notes}</p>
+          </div>
+        ) : null}
       </div>
 
       {/* Update stage */}
@@ -360,12 +554,14 @@ export default function ApplicationDetailPage() {
           <Button
             className="rounded-xl bg-indigo-600 hover:bg-indigo-700"
             onClick={handleSaveStage}
+            disabled={saving}
           >
-            Save stage
+            {saving ? "Saving..." : "Save stage"}
           </Button>
         </div>
       </div>
 
+      {/* Timeline */}
       <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-5 shadow-sm backdrop-blur">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-900">Timeline</h2>
@@ -387,7 +583,6 @@ export default function ApplicationDetailPage() {
 
             return (
               <div key={e.id} className="relative flex gap-4">
-                {/* Left rail */}
                 <div className="relative flex w-10 flex-col items-center">
                   <div
                     className={[
@@ -405,7 +600,6 @@ export default function ApplicationDetailPage() {
                   )}
                 </div>
 
-                {/* Content */}
                 <div className="min-w-0 flex-1 rounded-2xl border border-slate-200/70 bg-white/60 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -419,7 +613,7 @@ export default function ApplicationDetailPage() {
                           {meta.label}
                           {e.detail ? (
                             <span className="ml-2 text-xs font-medium text-slate-600">
-                              · {prettyDetail(String(e.detail))}
+                              · {prettyDetail(e.detail)}
                             </span>
                           ) : null}
                         </p>
@@ -433,7 +627,7 @@ export default function ApplicationDetailPage() {
                         e.stage === "technical_test") && (
                         <div className="mt-2 space-y-1">
                           {e.mode === "online" && e.meetLink ? (
-                            <p className="text-sm text-slate-600 break-all">
+                            <p className="break-all text-sm text-slate-600">
                               Online · {e.meetLink}
                             </p>
                           ) : null}

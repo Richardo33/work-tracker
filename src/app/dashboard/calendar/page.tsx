@@ -1,6 +1,7 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,8 +33,8 @@ type CalEvent = {
   id: string;
   title: string;
   type: EventType;
-  startAt: string; // "YYYY-MM-DDTHH:mm:00"
-  endAt?: string; // "YYYY-MM-DDTHH:mm:00"
+  startAt: string; // ISO
+  endAt?: string; // ISO
   company?: string;
   locationType?: LocationType;
   meetLink?: string;
@@ -59,6 +60,24 @@ type ToastItem = {
   description?: string;
   variant?: "default" | "success" | "destructive";
 };
+
+type CalendarEventDTO = {
+  id: string;
+  title: string;
+  type: EventType;
+  company: string | null;
+  startAt: string; // ISO
+  endAt: string | null; // ISO
+  locationType: LocationType | null;
+  meetLink: string | null;
+  place: string | null;
+  note: string | null;
+  applicationId: string | null;
+};
+
+type CalendarListResponse = { items: CalendarEventDTO[] };
+type CalendarItemResponse = { item: CalendarEventDTO };
+type ApiError = { message?: string };
 
 const MONTHS_ID = [
   "Januari",
@@ -114,7 +133,7 @@ function startOfWeekMonday(d: Date) {
 
 function parseSafeDate(iso: string) {
   const d = new Date(iso);
-  return isNaN(d.getTime()) ? null : d;
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 function minutesFromGridStart(d: Date) {
@@ -132,14 +151,15 @@ function toDateTimeLocalValue(d: Date) {
 }
 
 function localValueToISO(localValue: string) {
+  // input datetime-local => local time
   const d = new Date(localValue);
-  if (isNaN(d.getTime())) return null;
-  return `${localValue}:00`;
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
 }
 
 function isoToLocalValue(iso: string) {
   const d = new Date(iso);
-  if (isNaN(d.getTime())) return "";
+  if (Number.isNaN(d.getTime())) return "";
   return toDateTimeLocalValue(d);
 }
 
@@ -186,30 +206,11 @@ function dotClass(t: EventType) {
   }
 }
 
-// mock events
-const seedEvents: CalEvent[] = [
-  {
-    id: "e1",
-    title: "HR Interview",
-    type: "interview_hr",
-    company: "PT Example",
-    startAt: "2026-01-07T14:00:00",
-    endAt: "2026-01-07T14:45:00",
-    locationType: "online",
-    meetLink: "https://meet.google.com/xxx-xxxx-xxx",
-    note: "Prepare intro + NextStep2.",
-  },
-  {
-    id: "e2",
-    title: "Live Coding",
-    type: "technical_test",
-    company: "Company A",
-    startAt: "2026-01-08T10:00:00",
-    endAt: "2026-01-08T11:30:00",
-    locationType: "online",
-    meetLink: "https://meet.google.com/yyy-yyyy-yyy",
-  },
-];
+function weekRangeISO(anchor: Date) {
+  const start = startOfWeekMonday(anchor);
+  const end = addDays(start, 7);
+  return { startISO: start.toISOString(), endISO: end.toISOString() };
+}
 
 /** ---------- Tiny Toast (no external deps) ---------- */
 function ToastStack({
@@ -267,7 +268,7 @@ function ToastStack({
   );
 }
 
-/** ---------- Confirm Delete Dialog (no nested button) ---------- */
+/** ---------- Confirm Delete Dialog ---------- */
 function ConfirmDialog({
   open,
   title,
@@ -340,7 +341,52 @@ export default function CalendarPage() {
     new Date(today.getFullYear(), today.getMonth(), 1)
   );
 
-  const [events, setEvents] = useState<CalEvent[]>(seedEvents);
+  const [events, setEvents] = useState<CalEvent[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(false);
+
+  async function loadWeek(anchor: Date) {
+    setLoadingEvents(true);
+    try {
+      const { startISO, endISO } = weekRangeISO(anchor);
+
+      const res = await fetch(
+        `/api/calendar-events?start=${encodeURIComponent(
+          startISO
+        )}&end=${encodeURIComponent(endISO)}`,
+        { cache: "no-store" }
+      );
+
+      if (!res.ok) {
+        setEvents([]);
+        return;
+      }
+
+      const data = (await res.json()) as CalendarListResponse;
+      const items = Array.isArray(data.items) ? data.items : [];
+
+      const mapped: CalEvent[] = items.map((x) => ({
+        id: x.id,
+        title: x.title,
+        type: x.type,
+        startAt: x.startAt,
+        endAt: x.endAt ?? undefined,
+        company: x.company ?? undefined,
+        locationType: x.locationType ?? undefined,
+        meetLink: x.meetLink ?? undefined,
+        place: x.place ?? undefined,
+        note: x.note ?? undefined,
+      }));
+
+      setEvents(mapped);
+    } finally {
+      setLoadingEvents(false);
+    }
+  }
+
+  useEffect(() => {
+    loadWeek(weekAnchor).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekAnchor]);
 
   // now updater
   const [now, setNow] = useState<Date>(() => new Date());
@@ -372,16 +418,42 @@ export default function CalendarPage() {
     setConfirmOpen(true);
   }
 
-  function doDelete() {
+  async function doDelete() {
     if (!pendingDelete) return;
-    setEvents((prev) => prev.filter((e) => e.id !== pendingDelete.id));
-    pushToast({
-      title: "Event deleted",
-      description: pendingDelete.title,
-      variant: "destructive",
-    });
-    setConfirmOpen(false);
-    setPendingDelete(null);
+
+    const ev = pendingDelete;
+    try {
+      const res = await fetch(`/api/calendar-events/${ev.id}`, {
+        method: "DELETE",
+      });
+
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as ApiError | null;
+        pushToast({
+          title: "Failed to delete",
+          description: data?.message ?? "Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      pushToast({
+        title: "Event deleted",
+        description: ev.title,
+        variant: "destructive",
+      });
+
+      setConfirmOpen(false);
+      setPendingDelete(null);
+
+      await loadWeek(weekAnchor);
+    } catch {
+      pushToast({
+        title: "Failed to delete",
+        description: "Network error.",
+        variant: "destructive",
+      });
+    }
   }
 
   // unified modal (ADD / EDIT)
@@ -555,7 +627,19 @@ export default function CalendarPage() {
     setFormOpen(true);
   }
 
-  function saveForm() {
+  type UpsertBody = {
+    title: string;
+    type: EventType;
+    startAt: string;
+    endAt: string | null;
+    company: string | null;
+    locationType: LocationType | null;
+    meetLink: string | null;
+    place: string | null;
+    note: string | null;
+  };
+
+  async function saveForm() {
     if (!draft.title.trim()) {
       pushToast({
         title: "Title is required",
@@ -567,6 +651,7 @@ export default function CalendarPage() {
 
     const startIso = localValueToISO(draft.startAtLocal);
     const endIso = localValueToISO(draft.endAtLocal);
+
     if (!startIso || !endIso) {
       pushToast({
         title: "Invalid date/time",
@@ -587,57 +672,118 @@ export default function CalendarPage() {
       return;
     }
 
-    const payload: Omit<CalEvent, "id"> = {
+    const body: UpsertBody = {
       title: draft.title.trim(),
       type: draft.type,
       startAt: startIso,
       endAt: endIso,
-      company: draft.company.trim() ? draft.company.trim() : undefined,
+      company: draft.company.trim() ? draft.company.trim() : null,
       locationType: draft.locationType,
       meetLink:
         draft.locationType === "online" && draft.meetLink.trim()
           ? draft.meetLink.trim()
-          : undefined,
+          : null,
       place:
         draft.locationType === "offline" && draft.place.trim()
           ? draft.place.trim()
-          : undefined,
-      note: draft.note.trim() ? draft.note.trim() : undefined,
+          : null,
+      note: draft.note.trim() ? draft.note.trim() : null,
     };
 
+    // ADD
     if (formMode === "add") {
-      const newEv: CalEvent = {
-        id: `ev_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-        ...payload,
-      };
-      setEvents((prev) => [...prev, newEv]);
-      setWeekAnchor(startOfDay(new Date(startIso)));
-      setFormOpen(false);
+      try {
+        const res = await fetch("/api/calendar-events", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
 
-      pushToast({
-        title: "Event created",
-        description: newEv.title,
-        variant: "success",
-      });
+        const data = (await res.json().catch(() => null)) as
+          | CalendarItemResponse
+          | ApiError
+          | null;
+
+        if (!res.ok || !data || !("item" in data)) {
+          const msg =
+            data && "message" in data
+              ? data.message ?? "Please try again."
+              : "Please try again.";
+          pushToast({
+            title: "Failed to create",
+            description: msg,
+            variant: "destructive",
+          });
+          return;
+        }
+
+        setFormOpen(false);
+        pushToast({
+          title: "Event created",
+          description: data.item.title,
+          variant: "success",
+        });
+
+        const newAnchor = startOfDay(new Date(data.item.startAt));
+        setWeekAnchor(newAnchor);
+        await loadWeek(newAnchor);
+      } catch {
+        pushToast({
+          title: "Failed to create",
+          description: "Network error.",
+          variant: "destructive",
+        });
+      }
       return;
     }
 
+    // EDIT
     if (!editingId) return;
 
-    setEvents((prev) =>
-      prev.map((ev) => (ev.id === editingId ? { ...ev, ...payload } : ev))
-    );
+    try {
+      const res = await fetch(`/api/calendar-events/${editingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
 
-    setWeekAnchor(startOfDay(new Date(startIso)));
-    setFormOpen(false);
+      const data = (await res.json().catch(() => null)) as
+        | CalendarItemResponse
+        | ApiError
+        | null;
 
-    pushToast({
-      title: "Event updated",
-      description: payload.title,
-      variant: "success",
-    });
+      if (!res.ok || !data || !("item" in data)) {
+        const msg =
+          data && "message" in data
+            ? data.message ?? "Please try again."
+            : "Please try again.";
+        pushToast({
+          title: "Failed to update",
+          description: msg,
+          variant: "destructive",
+        });
+        return;
+      }
 
-    setEditingId(null);
+      setFormOpen(false);
+      setEditingId(null);
+
+      pushToast({
+        title: "Event updated",
+        description: data.item.title,
+        variant: "success",
+      });
+
+      const newAnchor = startOfDay(new Date(data.item.startAt));
+      setWeekAnchor(newAnchor);
+      await loadWeek(newAnchor);
+    } catch {
+      pushToast({
+        title: "Failed to update",
+        description: "Network error.",
+        variant: "destructive",
+      });
+    }
   }
 
   return (
@@ -668,6 +814,9 @@ export default function CalendarPage() {
           <p className="text-sm text-slate-600">
             Teams-like simple work week view.
           </p>
+          {loadingEvents ? (
+            <p className="mt-1 text-xs text-slate-500">Loading events...</p>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-2">
@@ -715,7 +864,8 @@ export default function CalendarPage() {
               <div>
                 <p className="text-sm font-semibold text-slate-900">Calendar</p>
                 <p className="text-xs text-slate-500">
-                  {MONTHS_ID[activeMonth]} {activeYear}
+                  {MONTHS_ID[monthCursor.getMonth()]}{" "}
+                  {monthCursor.getFullYear()}
                 </p>
               </div>
 
@@ -723,7 +873,13 @@ export default function CalendarPage() {
                 <button
                   className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white/60"
                   onClick={() =>
-                    setMonthCursor(new Date(activeYear, activeMonth - 1, 1))
+                    setMonthCursor(
+                      new Date(
+                        monthCursor.getFullYear(),
+                        monthCursor.getMonth() - 1,
+                        1
+                      )
+                    )
                   }
                   aria-label="Prev month"
                 >
@@ -732,7 +888,13 @@ export default function CalendarPage() {
                 <button
                   className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white/60"
                   onClick={() =>
-                    setMonthCursor(new Date(activeYear, activeMonth + 1, 1))
+                    setMonthCursor(
+                      new Date(
+                        monthCursor.getFullYear(),
+                        monthCursor.getMonth() + 1,
+                        1
+                      )
+                    )
                   }
                   aria-label="Next month"
                 >
@@ -751,7 +913,7 @@ export default function CalendarPage() {
 
             <div className="mt-1 grid grid-cols-7 gap-1">
               {monthDays.map((d) => {
-                const inMonth = d.getMonth() === activeMonth;
+                const inMonth = d.getMonth() === monthCursor.getMonth();
                 const isToday = isSameDay(d, today);
 
                 return (
@@ -820,7 +982,7 @@ export default function CalendarPage() {
 
             {/* body */}
             <div className="relative grid grid-cols-[70px_1fr]">
-              {/* time gutter - pixel perfect aligned */}
+              {/* time gutter */}
               <div
                 className="relative border-r border-slate-200/70"
                 style={{ height: `${GRID_BODY_HEIGHT_PX}px` }}
@@ -848,7 +1010,7 @@ export default function CalendarPage() {
                 className="relative grid grid-cols-5"
                 style={{ height: `${GRID_BODY_HEIGHT_PX}px` }}
               >
-                {/* hour lines (pixel perfect) */}
+                {/* hour lines */}
                 <div className="pointer-events-none absolute inset-0">
                   {Array.from({ length: SLOT_COUNT + 1 }).map((_, i) => {
                     const isHour = i % 2 === 0;
@@ -872,7 +1034,7 @@ export default function CalendarPage() {
                   })}
                 </div>
 
-                {/* now line full width */}
+                {/* now line */}
                 {nowLine.show && (
                   <div className="pointer-events-none absolute inset-0">
                     <div
@@ -900,7 +1062,7 @@ export default function CalendarPage() {
                       key={dayKey}
                       className="relative border-l border-slate-200/70"
                     >
-                      {/* slots behind events */}
+                      {/* slots */}
                       <div className="absolute inset-0 z-0">
                         {Array.from({ length: SLOT_COUNT }).map((_, i) => {
                           const minutes = i * SLOT_MINUTES;
@@ -987,7 +1149,6 @@ export default function CalendarPage() {
                                     </p>
                                   </div>
 
-                                  {/* IMPORTANT: not nested inside any <button> ancestor */}
                                   <button
                                     type="button"
                                     onClick={(clickEvent) => {
@@ -1036,7 +1197,6 @@ export default function CalendarPage() {
               </div>
             </div>
 
-            {/* small hint */}
             <div className="border-t border-slate-200/70 p-3 text-xs text-slate-500">
               Tip: click any slot to create an event.
             </div>
@@ -1044,7 +1204,7 @@ export default function CalendarPage() {
         </Card>
       </div>
 
-      {/* FORM MODAL (ADD / EDIT) */}
+      {/* FORM MODAL */}
       {formOpen && (
         <>
           <button
@@ -1139,7 +1299,7 @@ export default function CalendarPage() {
                         onChange={(e) => {
                           const nextStart = e.target.value;
                           const s = new Date(nextStart);
-                          const valid = !isNaN(s.getTime());
+                          const valid = !Number.isNaN(s.getTime());
                           const nextEnd = valid
                             ? toDateTimeLocalValue(
                                 new Date(s.getTime() + 60 * 60 * 1000)

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,104 +9,35 @@ import StatusBadge from "@/components/ui/Statusbadge";
 import { Search, ArrowUpDown } from "lucide-react";
 import AddApplicationDialog from "@/components/app/AddApplicationDialog";
 import ClientDateTime from "@/components/common/ClientDateTime";
-
-type Stage =
-  | "applied"
-  | "screening"
-  | "interview"
-  | "test"
-  | "offered"
-  | "hired"
-  | "rejected"
-  | "withdrawn"
-  | "ghosting";
+import { STATUS_META, type AppStatus } from "@/lib/applicationStatus";
 
 type InterviewType = "hr" | "user" | "technical" | "cultural" | "other";
 type TestType = "live_code" | "take_home" | "offline" | "psychotest" | "other";
 type StatusDetail = InterviewType | TestType;
 
-type Application = {
+type ApplicationDTO = {
   id: string;
   company: string;
   role: string;
   location: string;
   workSetup: "Onsite" | "Hybrid" | "Remote";
-  status: Stage;
-  statusDetail?: StatusDetail;
-  appliedAt: string; // ISO date
-  lastUpdate: string; // ISO date
-  nextEventAt?: string; // ISO datetime
-  nextEventTitle?: string;
+  status: AppStatus;
+  statusDetail?: string | null;
+  appliedAt: string; // ISO
+  lastUpdate: string; // ISO
+  nextEventAt?: string; // ISO
+  nextEventTitle?: string | null;
 };
 
-const data: Application[] = [
-  {
-    id: "a1",
-    company: "PT Example",
-    role: "Frontend Developer",
-    location: "Jakarta",
-    workSetup: "Hybrid",
-    status: "interview",
-    statusDetail: "hr",
-    appliedAt: "2025-12-21",
-    lastUpdate: "2026-01-04",
-    nextEventAt: "2026-01-07T14:00:00",
-    nextEventTitle: "HR Interview",
-  },
-  {
-    id: "a2",
-    company: "Company A",
-    role: "Fullstack Developer",
-    location: "Remote",
-    workSetup: "Remote",
-    status: "test",
-    statusDetail: "live_code",
-    appliedAt: "2025-12-15",
-    lastUpdate: "2026-01-05",
-    nextEventAt: "2026-01-08T10:00:00",
-    nextEventTitle: "Live Coding",
-  },
-  {
-    id: "a3",
-    company: "Startup B",
-    role: "Backend Developer",
-    location: "Bandung",
-    workSetup: "Onsite",
-    status: "screening",
-    appliedAt: "2025-12-10",
-    lastUpdate: "2025-12-12",
-  },
-  {
-    id: "a4",
-    company: "Fintech C",
-    role: "Junior Software Engineer",
-    location: "Jakarta",
-    workSetup: "Hybrid",
-    status: "ghosting",
-    appliedAt: "2025-11-20",
-    lastUpdate: "2025-11-25",
-  },
-  {
-    id: "a5",
-    company: "Agency D",
-    role: "React Developer",
-    location: "Tangerang",
-    workSetup: "Onsite",
-    status: "rejected",
-    appliedAt: "2025-12-01",
-    lastUpdate: "2025-12-05",
-  },
-];
-
-const statusTabs: Array<{ key: "all" | Stage; label: string }> = [
+const statusTabs: Array<{ key: "all" | AppStatus; label: string }> = [
   { key: "all", label: "All" },
-  { key: "applied", label: "Applied" },
-  { key: "screening", label: "Screening" },
-  { key: "interview", label: "Interview" },
-  { key: "test", label: "Test" },
-  { key: "offered", label: "Offered" },
-  { key: "ghosting", label: "Ghosting" },
-  { key: "rejected", label: "Rejected" },
+  { key: "applied", label: STATUS_META.applied.label },
+  { key: "screening", label: STATUS_META.screening.label },
+  { key: "interview", label: STATUS_META.interview.label },
+  { key: "technical_test", label: "Test" },
+  { key: "offer", label: STATUS_META.offer.label },
+  { key: "ghosting", label: STATUS_META.ghosting.label },
+  { key: "rejected", label: STATUS_META.rejected.label },
 ];
 
 type SortKey = "lastUpdateDesc" | "companyAsc" | "nextEventAsc" | "statusAsc";
@@ -118,21 +49,43 @@ const sortOptions: Array<{ key: SortKey; label: string }> = [
   { key: "statusAsc", label: "Status" },
 ];
 
-function prettyDetail(detail?: string) {
+function prettyDetail(detail?: string | null) {
   if (!detail) return "";
   return detail.replaceAll("_", " ").toUpperCase();
 }
 
 export default function TrackerPage() {
   const [query, setQuery] = useState("");
-  const [activeStatus, setActiveStatus] = useState<"all" | Stage>("all");
+  const [activeStatus, setActiveStatus] = useState<"all" | AppStatus>("all");
   const [sortKey, setSortKey] = useState<SortKey>("lastUpdateDesc");
   const [sortOpen, setSortOpen] = useState(false);
+
+  const [items, setItems] = useState<ApplicationDTO[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/applications", { cache: "no-store" });
+      if (!res.ok) {
+        setItems([]);
+        return;
+      }
+      const json: { items: ApplicationDTO[] } = await res.json();
+      setItems(Array.isArray(json.items) ? json.items : []);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
 
-    const rows = data.filter((a) => {
+    const rows = items.filter((a) => {
       const matchStatus =
         activeStatus === "all" ? true : a.status === activeStatus;
 
@@ -164,7 +117,7 @@ export default function TrackerPage() {
     });
 
     return rows;
-  }, [query, activeStatus, sortKey]);
+  }, [items, query, activeStatus, sortKey]);
 
   return (
     <div className="space-y-5">
@@ -177,10 +130,13 @@ export default function TrackerPage() {
           </p>
         </div>
 
+        {/* Kalau dialog kamu sudah POST ke /api/applications, kita refresh setelah close */}
         <AddApplicationDialog
           triggerText="Add application"
           triggerVariant="default"
           triggerClassName="rounded-xl bg-indigo-600 hover:bg-indigo-700"
+          // kalau komponenmu support callback, pakai ini:
+          // onCreated={load}
         />
       </div>
 
@@ -257,91 +213,106 @@ export default function TrackerPage() {
         <p className="mt-3 text-xs text-slate-500">
           Showing{" "}
           <span className="font-medium text-slate-700">{filtered.length}</span>{" "}
-          result
-          {filtered.length === 1 ? "" : "s"} · Sort:{" "}
+          result{filtered.length === 1 ? "" : "s"} · Sort:{" "}
           <span className="font-medium text-slate-700">
             {sortOptions.find((s) => s.key === sortKey)?.label}
           </span>
         </p>
       </div>
 
+      {/* Loading */}
+      {loading && (
+        <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-8 text-sm text-slate-600 shadow-sm backdrop-blur">
+          Loading...
+        </div>
+      )}
+
       {/* List */}
-      <div className="space-y-3">
-        {filtered.map((a) => (
-          <Link
-            key={a.id}
-            href={`/dashboard/applications/${a.id}`}
-            className="block"
-          >
-            <Card className="rounded-2xl border-slate-200/70 bg-white/70 shadow-sm backdrop-blur transition hover:border-slate-300 hover:bg-white hover:shadow-md">
-              <CardContent className="p-4">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-semibold text-slate-900">
-                        {a.company}
-                      </p>
-                      <span className="text-xs text-slate-500">
-                        • {a.location} • {a.workSetup}
-                      </span>
-                    </div>
-
-                    <p className="mt-1 text-sm text-slate-600">{a.role}</p>
-
-                    {(a.status === "interview" || a.status === "test") &&
-                    a.statusDetail ? (
-                      <p className="mt-2 text-xs text-slate-600">
-                        Current:{" "}
-                        <span className="font-medium text-slate-800">
-                          {a.status.toUpperCase()} ·{" "}
-                          {prettyDetail(a.statusDetail)}
+      {!loading && (
+        <div className="space-y-3">
+          {filtered.map((a) => (
+            <Link
+              key={a.id}
+              href={`/dashboard/applications/${a.id}`}
+              className="block"
+            >
+              <Card className="rounded-2xl border-slate-200/70 bg-white/70 shadow-sm backdrop-blur transition hover:border-slate-300 hover:bg-white hover:shadow-md">
+                <CardContent className="p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-slate-900">
+                          {a.company}
+                        </p>
+                        <span className="text-xs text-slate-500">
+                          • {a.location} • {a.workSetup}
                         </span>
-                      </p>
-                    ) : null}
+                      </div>
 
-                    <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
-                      <span>
-                        Applied:{" "}
-                        <ClientDateTime value={a.appliedAt} showTime={false} />
-                      </span>
+                      <p className="mt-1 text-sm text-slate-600">{a.role}</p>
 
-                      <span>
-                        Last update:{" "}
-                        <ClientDateTime value={a.lastUpdate} showTime={false} />
-                      </span>
-
-                      {a.nextEventAt ? (
-                        <span className="text-slate-700">
-                          Next:{" "}
-                          <span className="font-medium">
-                            {a.nextEventTitle} ·{" "}
-                            <ClientDateTime value={a.nextEventAt} />
+                      {(a.status === "interview" ||
+                        a.status === "technical_test") &&
+                      a.statusDetail ? (
+                        <p className="mt-2 text-xs text-slate-600">
+                          Current:{" "}
+                          <span className="font-medium text-slate-800">
+                            {STATUS_META[a.status].label} ·{" "}
+                            {prettyDetail(a.statusDetail as StatusDetail)}
                           </span>
+                        </p>
+                      ) : null}
+
+                      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                        <span>
+                          Applied:{" "}
+                          <ClientDateTime
+                            value={a.appliedAt}
+                            showTime={false}
+                          />
                         </span>
-                      ) : (
-                        <span>Next: -</span>
-                      )}
+
+                        <span>
+                          Last update:{" "}
+                          <ClientDateTime
+                            value={a.lastUpdate}
+                            showTime={false}
+                          />
+                        </span>
+
+                        {a.nextEventAt ? (
+                          <span className="text-slate-700">
+                            Next:{" "}
+                            <span className="font-medium">
+                              {a.nextEventTitle ?? "Upcoming"} ·{" "}
+                              <ClientDateTime value={a.nextEventAt} />
+                            </span>
+                          </span>
+                        ) : (
+                          <span>Next: -</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 md:flex-col md:items-end">
+                      <StatusBadge status={a.status} />
+                      <span className="text-xs text-indigo-700 hover:underline">
+                        View details
+                      </span>
                     </div>
                   </div>
+                </CardContent>
+              </Card>
+            </Link>
+          ))}
 
-                  <div className="flex items-center justify-between gap-2 md:flex-col md:items-end">
-                    <StatusBadge status={a.status} />
-                    <span className="text-xs text-indigo-700 hover:underline">
-                      View details
-                    </span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-
-        {filtered.length === 0 && (
-          <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-10 text-center text-sm text-slate-600 shadow-sm backdrop-blur">
-            No applications found. Try a different keyword or filter.
-          </div>
-        )}
-      </div>
+          {filtered.length === 0 && (
+            <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-10 text-center text-sm text-slate-600 shadow-sm backdrop-blur">
+              No applications found. Try a different keyword or filter.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

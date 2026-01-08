@@ -18,12 +18,10 @@ export default function DashboardLayout({
       {/* Right side */}
       <div className="min-h-screen md:pl-64">
         <div className="mx-auto max-w-7xl px-4 py-4">
-          {/* Desktop topbar (di mobile sudah ada header dari MobileSidebar) */}
           <div className="hidden md:block">
             <Topbar />
           </div>
 
-          {/* Scrollable content area */}
           <main className="mt-4">{children}</main>
         </div>
       </div>

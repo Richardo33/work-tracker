@@ -1,10 +1,15 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import StatusBadge from "@/components/ui/Statusbadge";
 import ClientDateTime from "@/components/common/ClientDateTime";
 import { STATUS_META, type AppStatus } from "@/lib/applicationStatus";
 import { ArrowRight, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/server-auth";
+
+export const dynamic = "force-dynamic";
 
 type AppItem = {
   id: string;
@@ -12,45 +17,9 @@ type AppItem = {
   role: string;
   status: AppStatus;
   nextEventAt?: string; // ISO
-  nextEventTitle?: string;
+  nextEventTitle?: string | null;
+  lastUpdate: string; // ISO (buat sort recent)
 };
-
-const applications: AppItem[] = [
-  {
-    id: "a1",
-    company: "PT Example",
-    role: "Frontend Developer",
-    status: "interview",
-    nextEventAt: "2026-01-04T14:00:00",
-    nextEventTitle: "HR Interview",
-  },
-  {
-    id: "a2",
-    company: "Company A",
-    role: "Fullstack Developer",
-    status: "technical_test",
-    nextEventAt: "2026-01-05T10:00:00",
-    nextEventTitle: "Technical Test",
-  },
-  {
-    id: "a3",
-    company: "Startup B",
-    role: "Backend Developer",
-    status: "screening",
-  },
-  {
-    id: "a4",
-    company: "Fintech C",
-    role: "Junior Software Engineer",
-    status: "ghosting",
-  },
-  {
-    id: "a5",
-    company: "Agency D",
-    role: "React Developer",
-    status: "rejected",
-  },
-];
 
 const statusMeta = (
   [
@@ -81,21 +50,53 @@ function countByStatus(rows: AppItem[]) {
     withdrawn: 0,
   };
 
-  for (const r of rows) {
-    init[r.status] += 1;
-  }
+  for (const r of rows) init[r.status] += 1;
   return init;
 }
 
-function getUpcoming(rows: AppItem[]) {
+function getUpcoming(rows: AppItem[], days = 7) {
+  const now = Date.now();
+  const end = now + days * 24 * 60 * 60 * 1000;
+
   return rows
     .filter((r) => r.nextEventAt)
     .map((r) => ({ ...r, t: new Date(r.nextEventAt as string).getTime() }))
-    .filter((r) => !Number.isNaN(r.t))
+    .filter((r) => !Number.isNaN(r.t) && r.t >= now && r.t <= end)
     .sort((a, b) => a.t - b.t);
 }
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    redirect("/login");
+  }
+
+  const rows = await prisma.application.findMany({
+    where: { userId },
+    select: {
+      id: true,
+      company: true,
+      role: true,
+      status: true,
+      nextEventAt: true,
+      nextEventTitle: true,
+      lastUpdate: true,
+    },
+    orderBy: { lastUpdate: "desc" },
+  });
+
+  const applications: AppItem[] = rows.map((r) => ({
+    id: r.id,
+    company: r.company,
+    role: r.role,
+    status: r.status as unknown as AppStatus, // enum prisma harusnya sama dengan AppStatus kamu
+    nextEventAt: r.nextEventAt ? r.nextEventAt.toISOString() : undefined,
+    nextEventTitle: r.nextEventTitle ?? null,
+    lastUpdate: r.lastUpdate.toISOString(),
+  }));
+
   const stats = countByStatus(applications);
   const total = applications.length;
 
@@ -103,7 +104,7 @@ export default function DashboardPage() {
     (a) => a.status !== "rejected" && a.status !== "withdrawn"
   ).length;
 
-  const upcoming = getUpcoming(applications);
+  const upcoming = getUpcoming(applications, 7);
   const nextUp = upcoming[0] ?? null;
 
   const distribution = total
@@ -191,7 +192,7 @@ export default function DashboardPage() {
             <p className="text-xs text-slate-600">Next up</p>
             {nextUp ? (
               <>
-                <p className="mt-2 text-sm font-semibold text-slate-900 truncate">
+                <p className="mt-2 truncate text-sm font-semibold text-slate-900">
                   {nextUp.nextEventTitle ?? "Upcoming event"}
                 </p>
                 <p className="mt-1 text-xs text-slate-600">
@@ -211,7 +212,7 @@ export default function DashboardPage() {
               <>
                 <p className="mt-2 text-sm font-semibold text-slate-900">-</p>
                 <p className="mt-1 text-xs text-slate-500">
-                  No upcoming agenda
+                  No upcoming agenda (next 7 days)
                 </p>
               </>
             )}
@@ -281,40 +282,47 @@ export default function DashboardPage() {
         </div>
 
         <div className="mt-4 space-y-3">
-          {recent.map((a) => (
-            <Link
-              key={a.id}
-              href={`/dashboard/applications/${a.id}`}
-              className="block rounded-2xl border border-slate-200/70 bg-white/60 p-4 hover:bg-white"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-slate-900">
-                    {a.company}
-                  </p>
-                  <p className="mt-1 text-sm text-slate-600">{a.role}</p>
-
-                  {a.nextEventAt ? (
-                    <p className="mt-2 text-xs text-slate-500">
-                      Next:{" "}
-                      <span className="font-medium text-slate-700">
-                        {a.nextEventTitle}
-                      </span>{" "}
-                      · <ClientDateTime value={a.nextEventAt} />
+          {recent.length === 0 ? (
+            <div className="rounded-2xl border border-slate-200/70 bg-white/60 p-6 text-sm text-slate-600">
+              No applications yet. Click{" "}
+              <span className="font-medium">Add</span> to start tracking.
+            </div>
+          ) : (
+            recent.map((a) => (
+              <Link
+                key={a.id}
+                href={`/dashboard/applications/${a.id}`}
+                className="block rounded-2xl border border-slate-200/70 bg-white/60 p-4 hover:bg-white"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">
+                      {a.company}
                     </p>
-                  ) : (
-                    <p className="mt-2 text-xs text-slate-500">
-                      No upcoming agenda
-                    </p>
-                  )}
-                </div>
+                    <p className="mt-1 text-sm text-slate-600">{a.role}</p>
 
-                <div className="shrink-0">
-                  <StatusBadge status={a.status} />
+                    {a.nextEventAt ? (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Next:{" "}
+                        <span className="font-medium text-slate-700">
+                          {a.nextEventTitle ?? "Upcoming event"}
+                        </span>{" "}
+                        · <ClientDateTime value={a.nextEventAt} />
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-xs text-slate-500">
+                        No upcoming agenda
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="shrink-0">
+                    <StatusBadge status={a.status} />
+                  </div>
                 </div>
-              </div>
-            </Link>
-          ))}
+              </Link>
+            ))
+          )}
         </div>
       </div>
 
@@ -345,7 +353,7 @@ export default function DashboardPage() {
                     <ClientDateTime value={a.nextEventAt} />
                   </p>
                   <p className="mt-1 text-sm font-semibold text-slate-900">
-                    {a.nextEventTitle}
+                    {a.nextEventTitle ?? "Upcoming event"}
                   </p>
                   <p className="mt-1 text-sm text-slate-600">
                     {a.company} · {a.role}

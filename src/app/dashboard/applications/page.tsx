@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useMemo, useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,68 +21,13 @@ type Application = {
   location: string;
   workSetup: "Onsite" | "Hybrid" | "Remote";
   status: Status;
-  appliedAt: string; // YYYY-MM-DD or ISO
-  lastUpdate: string; // YYYY-MM-DD or ISO
-  nextEventAt?: string; // ISO (optional)
-  nextEventTitle?: string;
+  appliedAt: string; // ISO
+  lastUpdate: string; // ISO
+  nextEventAt?: string; // ISO
+  nextEventTitle?: string | null;
 };
 
-const data: Application[] = [
-  {
-    id: "a1",
-    company: "PT Example",
-    role: "Frontend Developer",
-    location: "Jakarta",
-    workSetup: "Hybrid",
-    status: "interview",
-    appliedAt: "2025-12-21",
-    lastUpdate: "2025-12-26",
-    nextEventAt: "2026-01-04T14:00:00",
-    nextEventTitle: "HR Interview",
-  },
-  {
-    id: "a2",
-    company: "Company A",
-    role: "Fullstack Developer",
-    location: "Remote",
-    workSetup: "Remote",
-    status: "technical_test",
-    appliedAt: "2025-12-15",
-    lastUpdate: "2025-12-27",
-    nextEventAt: "2026-01-05T10:00:00",
-    nextEventTitle: "Technical Test",
-  },
-  {
-    id: "a3",
-    company: "Startup B",
-    role: "Backend Developer",
-    location: "Bandung",
-    workSetup: "Onsite",
-    status: "screening",
-    appliedAt: "2025-12-10",
-    lastUpdate: "2025-12-12",
-  },
-  {
-    id: "a4",
-    company: "Fintech C",
-    role: "Junior Software Engineer",
-    location: "Jakarta",
-    workSetup: "Hybrid",
-    status: "ghosting",
-    appliedAt: "2025-11-20",
-    lastUpdate: "2025-11-25",
-  },
-  {
-    id: "a5",
-    company: "Agency D",
-    role: "React Developer",
-    location: "Tangerang",
-    workSetup: "Onsite",
-    status: "rejected",
-    appliedAt: "2025-12-01",
-    lastUpdate: "2025-12-05",
-  },
-];
+type ApiResponse = { items: Application[] };
 
 const statusTabs: Array<{ key: "all" | Status; label: string }> = [
   { key: "all", label: "All" },
@@ -132,20 +78,14 @@ function countByStatus(rows: Application[]) {
     withdrawn: 0,
   };
 
-  for (const r of rows) {
-    const k = r.status as Status;
-    if (k in init) init[k] += 1;
-  }
+  for (const r of rows) init[r.status] += 1;
   return init;
 }
 
 function getNextUpcoming(rows: Application[]) {
   const upcoming = rows
     .filter((r) => r.nextEventAt)
-    .map((r) => ({
-      ...r,
-      t: new Date(r.nextEventAt as string).getTime(),
-    }))
+    .map((r) => ({ ...r, t: new Date(r.nextEventAt as string).getTime() }))
     .filter((r) => !Number.isNaN(r.t))
     .sort((a, b) => a.t - b.t);
 
@@ -153,17 +93,62 @@ function getNextUpcoming(rows: Application[]) {
 }
 
 export default function ApplicationsPage() {
+  const router = useRouter();
+
+  const [apps, setApps] = useState<Application[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const [query, setQuery] = useState("");
   const [activeStatus, setActiveStatus] = useState<"all" | Status>("all");
   const [sortKey, setSortKey] = useState<SortKey>("lastUpdateDesc");
   const [sortOpen, setSortOpen] = useState(false);
 
+  useEffect(() => {
+    const ac = new AbortController();
+
+    async function run() {
+      try {
+        setLoading(true);
+        setLoadError(null);
+
+        const res = await fetch("/api/applications", {
+          method: "GET",
+          cache: "no-store",
+          signal: ac.signal,
+        });
+
+        if (res.status === 401) {
+          router.replace("/login");
+          return;
+        }
+
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || `HTTP ${res.status}`);
+        }
+
+        const json = (await res.json()) as ApiResponse;
+        setApps(json.items ?? []);
+      } catch (e) {
+        if (ac.signal.aborted) return;
+        setLoadError(e instanceof Error ? e.message : "Failed to load data");
+      } finally {
+        if (!ac.signal.aborted) setLoading(false);
+      }
+    }
+
+    run();
+    return () => ac.abort();
+  }, [router]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
 
-    const rows = data.filter((a) => {
+    const rows = apps.filter((a) => {
       const matchStatus =
         activeStatus === "all" ? true : a.status === activeStatus;
+
       const matchQuery =
         q.length === 0
           ? true
@@ -192,7 +177,7 @@ export default function ApplicationsPage() {
     });
 
     return rows;
-  }, [query, activeStatus, sortKey]);
+  }, [apps, query, activeStatus, sortKey]);
 
   const stats = useMemo(() => countByStatus(filtered), [filtered]);
   const nextUp = useMemo(() => getNextUpcoming(filtered), [filtered]);
@@ -209,6 +194,53 @@ export default function ApplicationsPage() {
       }))
       .filter((x) => x.count > 0);
   }, [stats, total]);
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-lg font-semibold text-slate-900">Applications</h1>
+          <p className="text-sm text-slate-600">Loading from database...</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-6 shadow-sm backdrop-blur">
+          <p className="text-sm text-slate-600">Please wait…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-lg font-semibold text-slate-900">Applications</h1>
+          <p className="text-sm text-slate-600">Failed to load data.</p>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-6 shadow-sm backdrop-blur">
+          <p className="text-sm text-slate-700">
+            Error: <span className="font-medium">{loadError}</span>
+          </p>
+
+          <div className="mt-4 flex gap-2">
+            <Button
+              className="rounded-xl bg-indigo-600 hover:bg-indigo-700"
+              onClick={() => window.location.reload()}
+            >
+              Retry
+            </Button>
+            <Button
+              variant="outline"
+              className="rounded-xl border-slate-200 bg-white/60"
+              asChild
+            >
+              <Link href="/dashboard">Back</Link>
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -364,7 +396,7 @@ export default function ApplicationsPage() {
             <p className="text-xs text-slate-500">Next up</p>
             {nextUp ? (
               <>
-                <p className="mt-1 text-sm font-semibold text-slate-900 truncate">
+                <p className="mt-1 truncate text-sm font-semibold text-slate-900">
                   {nextUp.nextEventTitle ?? "Upcoming event"}
                 </p>
                 <p className="mt-1 text-xs text-slate-600">
@@ -505,7 +537,7 @@ export default function ApplicationsPage() {
                         <span className="text-slate-700">
                           Next:{" "}
                           <span className="font-medium">
-                            {a.nextEventTitle} ·{" "}
+                            {a.nextEventTitle ?? "Upcoming event"} ·{" "}
                             <ClientDateTime value={a.nextEventAt} />
                           </span>
                         </span>

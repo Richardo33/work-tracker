@@ -9,29 +9,33 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import type { AppStatus } from "@/lib/applicationStatus";
 
 type WorkSetup = "Onsite" | "Hybrid" | "Remote";
-type Status =
-  | "applied"
-  | "screening"
-  | "interview"
-  | "technical_test"
-  | "offer"
-  | "rejected"
-  | "ghosting";
 
 function toDateLocalValue(date: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
   const yyyy = date.getFullYear();
   const MM = pad(date.getMonth() + 1);
   const dd = pad(date.getDate());
-  return `${yyyy}-${MM}-${dd}`; // input type="date"
+  return `${yyyy}-${MM}-${dd}`;
 }
+
+type CreatePayload = {
+  company: string;
+  role: string;
+  location: string;
+  workSetup: WorkSetup;
+  status: AppStatus;
+  appliedAt: string; // YYYY-MM-DD
+  jobLink?: string | null;
+  notes?: string | null;
+  requiredSkills?: string[];
+};
 
 export default function NewApplicationPage() {
   const router = useRouter();
 
-  // hydration-safe: jangan set default dari new Date() di initial state
   const [appliedAt, setAppliedAt] = useState<string>("");
 
   useEffect(() => {
@@ -42,10 +46,11 @@ export default function NewApplicationPage() {
   const [role, setRole] = useState("");
   const [location, setLocation] = useState("");
   const [workSetup, setWorkSetup] = useState<WorkSetup>("Hybrid");
-  const [status, setStatus] = useState<Status>("applied");
+  const [status, setStatus] = useState<AppStatus>("applied");
   const [jobLink, setJobLink] = useState("");
   const [notes, setNotes] = useState("");
   const [skills, setSkills] = useState(""); // comma separated
+  const [saving, setSaving] = useState(false);
 
   const errors = useMemo(() => {
     const e: Record<string, string> = {};
@@ -56,7 +61,6 @@ export default function NewApplicationPage() {
 
     if (jobLink.trim()) {
       try {
-        // validasi basic URL
         // eslint-disable-next-line no-new
         new URL(jobLink);
       } catch {
@@ -68,18 +72,16 @@ export default function NewApplicationPage() {
 
   const canSubmit = Object.keys(errors).length === 0;
 
-  function handleSubmit() {
-    if (!canSubmit) return;
+  async function handleSubmit() {
+    if (!canSubmit || saving) return;
 
-    const payload = {
-      id: crypto.randomUUID(),
+    const payload: CreatePayload = {
       company: company.trim(),
       role: role.trim(),
       location: location.trim(),
       workSetup,
       status,
       appliedAt, // YYYY-MM-DD
-      lastUpdate: appliedAt,
       jobLink: jobLink.trim() || null,
       notes: notes.trim() || null,
       requiredSkills: skills
@@ -88,20 +90,32 @@ export default function NewApplicationPage() {
         .filter(Boolean),
     };
 
-    // sementara: simpan ke localStorage (biar terasa “real” sebelum Supabase)
-    const key = "work-tracker:applications";
-    const prev = (() => {
-      try {
-        return JSON.parse(localStorage.getItem(key) ?? "[]");
-      } catch {
-        return [];
+    try {
+      setSaving(true);
+
+      const res = await fetch("/api/applications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.status === 401) {
+        router.replace("/login");
+        return;
       }
-    })();
 
-    localStorage.setItem(key, JSON.stringify([payload, ...prev]));
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
+      }
 
-    // balik ke tracker (atau detail)
-    router.push("/dashboard/applications");
+      const json = (await res.json()) as { application: { id: string } };
+      router.push(`/dashboard/applications/${json.application.id}`);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -122,7 +136,7 @@ export default function NewApplicationPage() {
       </div>
 
       <Card className="rounded-2xl border-slate-200/70 bg-white/70 shadow-sm backdrop-blur">
-        <CardContent className="p-5 space-y-5">
+        <CardContent className="space-y-5 p-5">
           {/* Row 1 */}
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -201,7 +215,7 @@ export default function NewApplicationPage() {
               <select
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white/60 px-3 text-sm outline-none focus:ring-2 focus:ring-indigo-200"
                 value={status}
-                onChange={(e) => setStatus(e.target.value as Status)}
+                onChange={(e) => setStatus(e.target.value as AppStatus)}
               >
                 <option value="applied">Applied</option>
                 <option value="screening">Screening</option>
@@ -210,6 +224,8 @@ export default function NewApplicationPage() {
                 <option value="offer">Offer</option>
                 <option value="rejected">Rejected</option>
                 <option value="ghosting">Ghosting</option>
+                <option value="hired">Hired</option>
+                <option value="withdrawn">Withdrawn</option>
               </select>
             </div>
 
@@ -256,10 +272,10 @@ export default function NewApplicationPage() {
             </Button>
             <Button
               className="rounded-xl bg-indigo-600 hover:bg-indigo-700"
-              disabled={!canSubmit}
+              disabled={!canSubmit || saving}
               onClick={handleSubmit}
             >
-              Save
+              {saving ? "Saving..." : "Save"}
             </Button>
           </div>
 
