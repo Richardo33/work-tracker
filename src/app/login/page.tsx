@@ -19,27 +19,29 @@ export default function LoginPage() {
     setLoading(true);
 
     const fd = new FormData(e.currentTarget);
-    const email = String(fd.get("email") ?? "");
+    const email = String(fd.get("email") ?? "").trim();
     const password = String(fd.get("password") ?? "");
 
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
 
-    setLoading(false);
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        setError(data?.message ?? "Login failed");
+        return;
+      }
 
-    if (!res.ok) {
-      const data = (await res.json().catch(() => null)) as {
-        message?: string;
-      } | null;
-      setError(data?.message ?? "Login failed");
-      return;
+      router.push("/dashboard");
+      router.refresh();
+    } finally {
+      setLoading(false);
     }
-
-    router.push("/dashboard");
-    router.refresh();
   }
 
   return (
@@ -64,7 +66,7 @@ export default function LoginPage() {
           </CardHeader>
 
           <CardContent className="space-y-4">
-            <form className="space-y-4" onSubmit={onSubmit}>
+            <form className="space-y-4" onSubmit={onSubmit} autoComplete="off">
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
@@ -73,6 +75,10 @@ export default function LoginPage() {
                   type="email"
                   placeholder="you@email.com"
                   required
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
                 />
               </div>
 
@@ -84,6 +90,10 @@ export default function LoginPage() {
                   type="password"
                   placeholder="••••••••"
                   required
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
                 />
               </div>
 
@@ -100,14 +110,6 @@ export default function LoginPage() {
               >
                 {loading ? "Logging in..." : "Login"}
               </Button>
-
-              <div className="rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-xs text-slate-600">
-                <div className="font-medium text-slate-700">
-                  Seed account (buat test):
-                </div>
-                <div>Email: {DEFAULT_EMAIL}</div>
-                <div>Password: Password123!</div>
-              </div>
             </form>
 
             <p className="text-center text-sm text-slate-600">
@@ -125,5 +127,3 @@ export default function LoginPage() {
     </main>
   );
 }
-
-const DEFAULT_EMAIL = "richardoalvin9@gmail.com";

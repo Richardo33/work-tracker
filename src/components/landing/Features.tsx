@@ -24,7 +24,13 @@ const features = [
 
 export default function Features() {
   return (
-    <section className="bg-linear-to-b from-white to-slate-50 px-6 py-20">
+    <section className="relative px-6 py-20">
+      {/* divider halus biar transisinya enak, bukan blok */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-linear-to-b from-white/0 via-white/20 to-white/0"
+      />
+
       <div className="mx-auto max-w-5xl">
         <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
           Core Features
